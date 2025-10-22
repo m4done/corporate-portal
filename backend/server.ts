@@ -12,10 +12,29 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
+const requiredEnvVars = [
+  "PORT",
+  "EXCEL_FILE_NAME",
+  "ALLOWED_ORIGINS",
+  "NODE_ENV",
+];
+const missingEnvVars = requiredEnvVars.filter(
+  (varName) => !process.env[varName]
+);
+
+if (missingEnvVars.length > 0) {
+  throw new Error(
+    `ОШИБКА: Отсутствуют обязательные переменные окружения в .env файле: ${missingEnvVars.join(
+      ", "
+    )}`
+  );
+}
+
 const app = express();
 const PORT = process.env.PORT || 3001;
-const EXCEL_FILE_PATH = path.join(
+const EXCEL_FILE_PATH = path.resolve(
   __dirname,
+  "..",
   process.env.EXCEL_FILE_NAME || "tel_book.xlsx"
 );
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",") || ["*"];
