@@ -1,0 +1,20 @@
+# Основные зависимости (применяется ко всем папкам)
+node_modules
+
+# Папки сборки и кэша
+/build
+/coverage
+.pnp
+.pnp.js
+
+# Локальные файлы окружения
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Журналы и системные файлы
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.DS_Store
