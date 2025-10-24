@@ -11,6 +11,7 @@ interface OfficeEmployee {
   fullName: string;
   internalNumber: string;
   generalNumber: string;
+  sortPriority: number;
 }
 
 interface Cabinet {
@@ -43,17 +44,20 @@ interface CachedData {
 
 // Константы
 const CACHE_KEY = "handbook_data_cache";
-const API_URL =
-  process.env.REACT_APP_API_URL || "https://192.168.100.122:3001/api/handbook";
+const API_URL = process.env.REACT_APP_API_URL || "/api/handbook";
 const MAX_CACHE_AGE_HOURS = 12;
 
 // Вспомогательные функции
 const groupAndSortOfficeData = (data: OfficeEmployee[]): GroupedOfficeData => {
-  const sortedByFullName = [...data].sort((a, b) =>
-    a.fullName.toLowerCase().localeCompare(b.fullName.toLowerCase())
-  );
+  const sortedByPriority = [...data].sort((a, b) => {
+    const priorityCompare = a.sortPriority - b.sortPriority;
+    if (priorityCompare !== 0) {
+      return priorityCompare;
+    }
+    return a.fullName.toLowerCase().localeCompare(b.fullName.toLowerCase());
+  });
 
-  const grouped = sortedByFullName.reduce<GroupedOfficeData>(
+  const grouped = sortedByPriority.reduce<GroupedOfficeData>(
     (acc, employee) => {
       const dept = employee.department || "Без отдела";
       if (!acc[dept]) {
@@ -270,6 +274,29 @@ const Handbook: React.FC = () => {
     const keys: (keyof Cabinet)[] = ["city", "address", "internalNumber"];
     return filterData(data.cabinets, searchQuery, keys);
   }, [data.cabinets, searchQuery, filterData]);
+
+  useEffect(() => {
+    // Не делаем ничего, если поиск пуст
+    if (!searchQuery) {
+      return;
+    }
+
+    const hasOfficeResults = Object.keys(filteredOffice).length > 0;
+    const hasCabinetsResults = filteredCabinets.length > 0;
+
+    // Если результаты есть ТОЛЬКО в офисе, а мы не на этой вкладке
+    if (hasOfficeResults && !hasCabinetsResults && activeTab !== "office") {
+      setActiveTab("office");
+    }
+    // Если результаты есть ТОЛЬКО в кабинетах, а мы не на этой вкладке
+    else if (
+      !hasOfficeResults &&
+      hasCabinetsResults &&
+      activeTab !== "cabinets"
+    ) {
+      setActiveTab("cabinets");
+    }
+  }, [searchQuery, filteredOffice, filteredCabinets, activeTab]);
 
   const toggleDepartment = (deptName: string) => {
     setExpandedDepartments((prev) =>

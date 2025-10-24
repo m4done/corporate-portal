@@ -46,6 +46,7 @@ interface OfficeEmployee {
   fullName: string;
   internalNumber: string;
   generalNumber: string;
+  sortPriority: number;
 }
 
 interface Cabinet {
@@ -141,10 +142,11 @@ async function loadHandbookData(): Promise<HandbookData | null> {
 
         officeData.push({
           department: sanitizeString(cleanValues[0]),
-          position: sanitizeString(cleanValues[1]),
-          fullName: sanitizeString(cleanValues[2]),
-          internalNumber: sanitizeString(cleanValues[3]),
-          generalNumber: sanitizeString(cleanValues[4]),
+          sortPriority: parseInt(sanitizeString(cleanValues[1])) || 99,
+          position: sanitizeString(cleanValues[2]),
+          fullName: sanitizeString(cleanValues[3]),
+          internalNumber: sanitizeString(cleanValues[4]),
+          generalNumber: sanitizeString(cleanValues[5]),
         });
       });
     }

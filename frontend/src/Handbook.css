@@ -143,6 +143,18 @@ th {
   border-bottom: 2px solid #ddd;
 }
 
+tbody tr:nth-child(even) {
+  background-color: #f1f3f5; /* Очень светлый серый для эффекта зебры */
+}
+
+tbody tr:hover {
+  background-color: #e9ecef; /* Слегка голубоватый/серый для подсветки */
+}
+
+tbody tr {
+  transition: background-color 0.2s ease-in-out;
+}
+
 /* --- ФИКС: Выравнивание номера в Кабинетах и в Заголовке Внутреннего номера --- */
 /* Применяем ко всем последним заголовкам (Внутренний номер) */
 .table-container th:last-child {
