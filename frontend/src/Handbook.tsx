@@ -1,10 +1,15 @@
-// src/Handbook.tsx
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import localforage from "localforage";
 import { format, differenceInHours } from "date-fns";
 import "./Handbook.css";
 
-// Типы
+// Interfaces
 interface OfficeEmployee {
   department: string;
   position: string;
@@ -27,12 +32,6 @@ interface GroupedOfficeData {
   };
 }
 
-interface HandbookData {
-  timestamp: number;
-  office: OfficeEmployee[];
-  cabinets: Cabinet[];
-}
-
 interface CachedData {
   data: {
     office: GroupedOfficeData;
@@ -42,12 +41,17 @@ interface CachedData {
   fetchTime: number;
 }
 
-// Константы
+// Constants
 const CACHE_KEY = "handbook_data_cache";
 const API_URL = process.env.REACT_APP_API_URL || "/api/handbook";
 const MAX_CACHE_AGE_HOURS = 12;
 
-// Вспомогательные функции
+/**
+ * Группирует сотрудников по отделам и сортирует их внутри групп.
+ * Сортировка происходит сначала по числовому приоритету, затем по ФИО.
+ * @param data - Массив данных о сотрудниках.
+ * @returns Объект с сгруппированными и отсортированными данными.
+ */
 const groupAndSortOfficeData = (data: OfficeEmployee[]): GroupedOfficeData => {
   const sortedByPriority = [...data].sort((a, b) => {
     const priorityCompare = a.sortPriority - b.sortPriority;
@@ -84,6 +88,11 @@ const groupAndSortOfficeData = (data: OfficeEmployee[]): GroupedOfficeData => {
   return finalGroupedData;
 };
 
+/**
+ * Сортирует данные о кабинетах сначала по городу, затем по адресу.
+ * @param data - Массив данных о кабинетах.
+ * @returns Отсортированный массив.
+ */
 const sortCabinetData = (data: Cabinet[]): Cabinet[] => {
   return [...data].sort((a, b) => {
     const cityCompare = a.city
@@ -94,16 +103,6 @@ const sortCabinetData = (data: Cabinet[]): Cabinet[] => {
   });
 };
 
-const clearCache = async (): Promise<void> => {
-  try {
-    await localforage.removeItem(CACHE_KEY);
-    console.log("Кэш успешно очищен.");
-  } catch (error) {
-    console.warn("Не удалось очистить кэш:", error);
-  }
-};
-
-// Компонент
 const Handbook: React.FC = () => {
   const [data, setData] = useState<{
     office: GroupedOfficeData;
@@ -117,7 +116,20 @@ const Handbook: React.FC = () => {
   const [lastUpdated, setLastUpdated] = useState<number | null>(null);
   const [expandedDepartments, setExpandedDepartments] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const [preSearchExpanded, setPreSearchExpanded] = useState<string[] | null>(
+    null
+  );
 
+  /**
+   * Загружает данные для справочника.
+   * Реализует стратегию "cache-then-network":
+   * 1. Пытается получить данные из кэша (localforage).
+   * 2. Если есть подключение к сети, запрашивает свежие данные с API.
+   * 3. В случае успеха обновляет кэш и состояние.
+   * 4. В случае ошибки сети использует данные из кэша, если они есть.
+   * @param forceUpdate - Если true, кэш будет проигнорирован и будет выполнен сетевой запрос.
+   */
   const fetchData = useCallback(async (forceUpdate = false) => {
     setLoadingStatus("Проверка данных...");
     setError(null);
@@ -129,21 +141,16 @@ const Handbook: React.FC = () => {
       console.warn("Ошибка чтения кэша (продолжаем без кэша):", e);
     }
 
-    const isOnline = navigator.onLine;
-
-    if (isOnline || forceUpdate) {
+    if (navigator.onLine || forceUpdate) {
       setLoadingStatus(
-        isOnline ? "Обновление данных..." : "Попытка обновления..."
+        navigator.onLine ? "Обновление данных..." : "Попытка обновления..."
       );
-
       try {
         const response = await fetch(API_URL);
         if (!response.ok) {
           throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
-
         const result = await response.json();
-
         if (result.status !== "success") {
           throw new Error(result.message || "Ошибка получения данных");
         }
@@ -152,22 +159,13 @@ const Handbook: React.FC = () => {
           office: groupAndSortOfficeData(result.data.office),
           cabinets: sortCabinetData(result.data.cabinets),
         };
-
         const newCache: CachedData = {
           data: newData,
           timestamp: result.data.timestamp,
           fetchTime: Date.now(),
         };
 
-        try {
-          await localforage.setItem(CACHE_KEY, newCache);
-        } catch (e) {
-          console.warn(
-            "Не удалось сохранить кэш (продолжаем без кэширования):",
-            e
-          );
-        }
-
+        await localforage.setItem(CACHE_KEY, newCache);
         setData(newData);
         setLastUpdated(newCache.fetchTime);
         setLoadingStatus("Данные успешно загружены с сервера.");
@@ -175,14 +173,12 @@ const Handbook: React.FC = () => {
       } catch (error: any) {
         console.error("Ошибка загрузки данных с API:", error);
         setError(error.message || "Неизвестная ошибка");
-
         if (cachedData?.data) {
           setData(cachedData.data);
           setLastUpdated(cachedData.fetchTime);
           setLoadingStatus("Ошибка сети. Загружены данные из локального кэша.");
           return;
         }
-
         setLoadingStatus("Ошибка загрузки. Проверьте подключение к серверу.");
         return;
       }
@@ -194,7 +190,6 @@ const Handbook: React.FC = () => {
         new Date(cachedData.fetchTime)
       );
       const isStale = cacheAgeHours >= MAX_CACHE_AGE_HOURS;
-
       setData(cachedData.data);
       setLastUpdated(cachedData.fetchTime);
       setLoadingStatus(
@@ -212,11 +207,24 @@ const Handbook: React.FC = () => {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  }, []);
+
   const handleUpdate = async () => {
-    await clearCache();
+    await localforage.removeItem(CACHE_KEY);
     fetchData(true);
   };
 
+  /**
+   * Универсальная функция для фильтрации массива объектов по строковому запросу.
+   * @param items - Массив для фильтрации.
+   * @param query - Поисковый запрос.
+   * @param keys - Ключи объектов, по которым будет производиться поиск.
+   * @returns Отфильтрованный массив.
+   */
   const filterData = useCallback(
     <T extends Record<string, any>>(
       items: T[],
@@ -225,12 +233,12 @@ const Handbook: React.FC = () => {
     ): T[] => {
       if (!query) return items;
       const lowerQuery = query.toLowerCase();
-
       return items.filter((item) =>
-        keys.some((key) => {
-          const value = String(item[key] || "").toLowerCase();
-          return value.includes(lowerQuery);
-        })
+        keys.some((key) =>
+          String(item[key] || "")
+            .toLowerCase()
+            .includes(lowerQuery)
+        )
       );
     },
     []
@@ -242,15 +250,9 @@ const Handbook: React.FC = () => {
       "position",
       "fullName",
       "internalNumber",
-      "generalNumber",
     ];
-
-    if (!searchQuery) {
-      return data.office;
-    }
-
+    if (!searchQuery) return data.office;
     const filteredGroupedData: GroupedOfficeData = {};
-
     Object.keys(data.office).forEach((deptName) => {
       const group = data.office[deptName];
       const filteredEmployees = filterData(
@@ -258,7 +260,6 @@ const Handbook: React.FC = () => {
         searchQuery,
         searchKeys
       );
-
       if (filteredEmployees.length > 0) {
         filteredGroupedData[deptName] = {
           employees: filteredEmployees,
@@ -266,7 +267,6 @@ const Handbook: React.FC = () => {
         };
       }
     });
-
     return filteredGroupedData;
   }, [data.office, searchQuery, filterData]);
 
@@ -275,21 +275,15 @@ const Handbook: React.FC = () => {
     return filterData(data.cabinets, searchQuery, keys);
   }, [data.cabinets, searchQuery, filterData]);
 
+  // Автоматически переключает вкладку, если результаты поиска найдены только в неактивной вкладке.
   useEffect(() => {
-    // Не делаем ничего, если поиск пуст
-    if (!searchQuery) {
-      return;
-    }
-
+    if (!searchQuery) return;
     const hasOfficeResults = Object.keys(filteredOffice).length > 0;
     const hasCabinetsResults = filteredCabinets.length > 0;
 
-    // Если результаты есть ТОЛЬКО в офисе, а мы не на этой вкладке
     if (hasOfficeResults && !hasCabinetsResults && activeTab !== "office") {
       setActiveTab("office");
-    }
-    // Если результаты есть ТОЛЬКО в кабинетах, а мы не на этой вкладке
-    else if (
+    } else if (
       !hasOfficeResults &&
       hasCabinetsResults &&
       activeTab !== "cabinets"
@@ -297,6 +291,15 @@ const Handbook: React.FC = () => {
       setActiveTab("cabinets");
     }
   }, [searchQuery, filteredOffice, filteredCabinets, activeTab]);
+
+  useEffect(() => {
+    if (searchQuery && preSearchExpanded === null) {
+      setPreSearchExpanded([...expandedDepartments]);
+    } else if (!searchQuery && preSearchExpanded !== null) {
+      setExpandedDepartments(preSearchExpanded);
+      setPreSearchExpanded(null);
+    }
+  }, [searchQuery, expandedDepartments, preSearchExpanded]);
 
   const toggleDepartment = (deptName: string) => {
     setExpandedDepartments((prev) =>
@@ -308,44 +311,38 @@ const Handbook: React.FC = () => {
 
   const renderOfficeTable = (items: GroupedOfficeData) => {
     const departmentKeys = Object.keys(items);
-
     if (departmentKeys.length === 0) {
       return (
         <p className="no-results">
           {searchQuery
-            ? "По вашему запросу не найдено ни одного сотрудника."
+            ? "По вашему запросу ничего не найдено."
             : "Нет данных для отображения."}
         </p>
       );
     }
-
     return (
       <div className="office-grouped-list">
         {departmentKeys.map((deptName) => {
           const group = items[deptName];
           const isExpanded =
-            expandedDepartments.includes(deptName) || searchQuery;
-
+            expandedDepartments.includes(deptName) || !!searchQuery;
           return (
             <div key={deptName} className="department-group">
               <div
                 className={`department-header ${isExpanded ? "expanded" : ""}`}
                 onClick={
-                  searchQuery ? undefined : () => toggleDepartment(deptName)
+                  !searchQuery ? () => toggleDepartment(deptName) : undefined
                 }
-                tabIndex={searchQuery ? undefined : 0}
-                role="button"
                 style={searchQuery ? { cursor: "default" } : {}}
               >
                 <span className="dept-name">{deptName}</span>
                 <span className="dept-general-number">
-                  Общий номер отдела: {group.generalNumber}
+                  Общий номер: {group.generalNumber}
                 </span>
                 <span className="expand-icon">
-                  {searchQuery ? "" : isExpanded ? "▼" : "▶"}
+                  {!searchQuery && (isExpanded ? "▼" : "▶")}
                 </span>
               </div>
-
               <div className={`employee-list ${isExpanded ? "open" : ""}`}>
                 <div className="table-container">
                   <table>
@@ -356,8 +353,8 @@ const Handbook: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {group.employees.map((employee, index) => (
-                        <tr key={index}>
+                      {group.employees.map((employee) => (
+                        <tr key={employee.fullName}>
                           <td className="person-details">
                             <div className="full-name">{employee.fullName}</div>
                             <div className="position">{employee.position}</div>
@@ -398,7 +395,9 @@ const Handbook: React.FC = () => {
       </table>
       {items.length === 0 && (
         <p className="no-results">
-          По вашему запросу не найдено ни одного кабинета.
+          {searchQuery
+            ? "По вашему запросу ничего не найдено."
+            : "Нет данных для отображения."}
         </p>
       )}
     </div>
@@ -407,10 +406,10 @@ const Handbook: React.FC = () => {
   return (
     <div className="handbook-container">
       <h1>Корпоративный Справочник</h1>
-
       <div className="controls-panel">
         <div className="search-wrapper">
           <input
+            ref={searchInputRef}
             type="text"
             placeholder="Быстрый поиск"
             value={searchQuery}
@@ -427,7 +426,6 @@ const Handbook: React.FC = () => {
           )}
         </div>
       </div>
-
       <div className="status-bar">
         {error && <span className="error-message">{error}</span>}
         {lastUpdated && (
@@ -436,7 +434,6 @@ const Handbook: React.FC = () => {
           </span>
         )}
       </div>
-
       <div className="tabs">
         <button
           className={`tab-button ${activeTab === "office" ? "active" : ""}`}
@@ -451,7 +448,6 @@ const Handbook: React.FC = () => {
           Кабинеты
         </button>
       </div>
-
       <div className="tab-content">
         {activeTab === "office" && renderOfficeTable(filteredOffice)}
         {activeTab === "cabinets" && renderCabinetTable(filteredCabinets)}

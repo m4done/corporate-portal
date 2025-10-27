@@ -1,4 +1,3 @@
-// server.ts
 import express, { Request, Response, NextFunction } from "express";
 import ExcelJS from "exceljs";
 import path from "path";
@@ -7,46 +6,30 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import winston from "winston";
 import sanitizeHtml from "sanitize-html";
-import { format } from "date-fns";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const requiredEnvVars = [
-  "PORT",
-  "EXCEL_FILE_NAME",
-  "ALLOWED_ORIGINS",
-  "NODE_ENV",
-];
-const missingEnvVars = requiredEnvVars.filter(
-  (varName) => !process.env[varName]
-);
-
+// Проверка наличия обязательных переменных окружения при старте
+const requiredEnvVars = ['PORT', 'EXCEL_FILE_NAME', 'ALLOWED_ORIGINS', 'NODE_ENV'];
+const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingEnvVars.length > 0) {
-  throw new Error(
-    `ОШИБКА: Отсутствуют обязательные переменные окружения в .env файле: ${missingEnvVars.join(
-      ", "
-    )}`
-  );
+  throw new Error(`ОШИБКА: Отсутствуют переменные окружения: ${missingEnvVars.join(', ')}`);
 }
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const EXCEL_FILE_PATH = path.resolve(
-  __dirname,
-  "..",
-  process.env.EXCEL_FILE_NAME || "tel_book.xlsx"
-);
-const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",") || ["*"];
+const EXCEL_FILE_PATH = path.resolve(__dirname, "..", process.env.EXCEL_FILE_NAME!);
+const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",") || [];
 
-// Типы данных
+// Data Interfaces
 interface OfficeEmployee {
   department: string;
+  sortPriority: number;
   position: string;
   fullName: string;
   internalNumber: string;
   generalNumber: string;
-  sortPriority: number;
 }
 
 interface Cabinet {
@@ -61,52 +44,43 @@ interface HandbookData {
   cabinets: Cabinet[];
 }
 
-// Настройка логирования
+// Настройка логгера
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
-  format: winston.format.combine(
-    winston.format.timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
+  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
   transports: [
     new winston.transports.File({ filename: "logs/error.log", level: "error" }),
     new winston.transports.File({ filename: "logs/combined.log" }),
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      ),
-    }),
+    new winston.transports.Console({ format: winston.format.simple() }),
   ],
 });
 
-// Создаем папку для логов
 if (!fs.existsSync("logs")) {
   fs.mkdirSync("logs");
 }
 
-// Кэш данных
+// Кэш данных в памяти
 let cachedData: HandbookData | null = null;
 let lastModifiedTime = 0;
 
 /**
- * Санитизация строки от потенциально опасного HTML/JS
+ * Очищает строку от HTML-тегов для предотвращения XSS-атак.
+ * @param input - Входная строка.
+ * @returns Очищенная строка.
  */
 function sanitizeString(input: any): string {
   if (!input) return "";
-  return sanitizeHtml(String(input), {
-    allowedTags: [],
-    allowedAttributes: {},
-  }).trim();
+  return sanitizeHtml(String(input), { allowedTags: [], allowedAttributes: {} }).trim();
 }
 
 /**
- * Функция для чтения Excel-файла с кэшированием
+ * Загружает и парсит данные из Excel-файла.
+ * Использует кэширование в памяти: если файл не был изменен с момента
+ * последней загрузки, возвращает данные из кэша.
+ * @returns Объект с данными справочника или null в случае ошибки.
  */
 async function loadHandbookData(): Promise<HandbookData | null> {
   try {
-    // Проверяем существование файла
     if (!fs.existsSync(EXCEL_FILE_PATH)) {
       logger.error(`Файл не найден: ${EXCEL_FILE_PATH}`);
       return null;
@@ -115,30 +89,24 @@ async function loadHandbookData(): Promise<HandbookData | null> {
     const stats = fs.statSync(EXCEL_FILE_PATH);
     const currentModTime = stats.mtimeMs;
 
-    // Возвращаем кэш если файл не изменился
     if (cachedData && lastModifiedTime === currentModTime) {
-      logger.info("Возврат данных из кэша");
+      logger.info("Возврат данных из кэша.");
       return cachedData;
     }
 
     logger.info(`Загрузка данных из: ${EXCEL_FILE_PATH}`);
-
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.readFile(EXCEL_FILE_PATH);
 
     const officeData: OfficeEmployee[] = [];
     const cabinetsData: Cabinet[] = [];
 
-    // Чтение листа "Офис"
     const officeSheet = workbook.getWorksheet("Офис");
     if (officeSheet) {
       officeSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return; // Пропускаем заголовки
-
-        const rowValues = row.values as any[];
-        const cleanValues = rowValues.slice(1);
-
-        if (cleanValues.every((val) => !val)) return; // Пропускаем пустые строки
+        if (rowNumber === 1) return;
+        const cleanValues = (row.values as any[]).slice(1);
+        if (cleanValues.every((val) => !val)) return;
 
         officeData.push({
           department: sanitizeString(cleanValues[0]),
@@ -151,15 +119,11 @@ async function loadHandbookData(): Promise<HandbookData | null> {
       });
     }
 
-    // Чтение листа "Кабинеты"
     const cabinetsSheet = workbook.getWorksheet("Кабинеты");
     if (cabinetsSheet) {
       cabinetsSheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-
-        const rowValues = row.values as any[];
-        const cleanValues = rowValues.slice(1);
-
+        const cleanValues = (row.values as any[]).slice(1);
         if (cleanValues.every((val) => !val)) return;
 
         cabinetsData.push({
@@ -170,7 +134,6 @@ async function loadHandbookData(): Promise<HandbookData | null> {
       });
     }
 
-    // Обновляем кэш
     cachedData = {
       timestamp: currentModTime,
       office: officeData,
@@ -178,10 +141,7 @@ async function loadHandbookData(): Promise<HandbookData | null> {
     };
     lastModifiedTime = currentModTime;
 
-    logger.info(
-      `Данные загружены. Офис: ${officeData.length}, Кабинеты: ${cabinetsData.length}`
-    );
-
+    logger.info(`Данные загружены. Офис: ${officeData.length}, Кабинеты: ${cabinetsData.length}`);
     return cachedData;
   } catch (error) {
     logger.error("Ошибка при обработке Excel-файла:", error);
@@ -189,176 +149,92 @@ async function loadHandbookData(): Promise<HandbookData | null> {
   }
 }
 
-// Middleware для принудительного HTTPS (кроме локальной разработки)
+// --- MIDDLEWARES ---
+
+// Принудительный редирект на HTTPS в production-среде
 app.use((req: Request, res: Response, next: NextFunction) => {
-  if (
-    process.env.NODE_ENV === "production" &&
-    req.headers["x-forwarded-proto"] !== "https"
-  ) {
+  if (process.env.NODE_ENV === "production" && req.headers["x-forwarded-proto"] !== "https") {
     return res.redirect(301, `https://${req.headers.host}${req.url}`);
   }
   next();
 });
 
-// Helmet для безопасности заголовков
-app.use(
-  helmet({
-    contentSecurityPolicy: false,
-    crossOriginEmbedderPolicy: false,
-  })
-);
+// Установка защитных HTTP-заголовков
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 
-// CORS настройка
+// Настройка CORS
 app.use((req: Request, res: Response, next: NextFunction) => {
   const origin = req.headers.origin;
-
-  if (
-    ALLOWED_ORIGINS.includes("*") ||
-    (origin && ALLOWED_ORIGINS.includes(origin))
-  ) {
-    res.header("Access-Control-Allow-Origin", origin || "*");
-    res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
-    res.header(
-      "Access-Control-Allow-Headers",
-      "Origin, X-Requested-With, Content-Type, Accept"
-    );
+  if (origin && ALLOWED_ORIGINS.includes(origin)) {
+    res.header("Access-Control-Allow-Origin", origin);
   }
-
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-
+  res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
 
-// Rate limiting
+// Ограничение количества запросов
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: {
-    status: "error",
-    message: "Слишком много запросов. Попробуйте через 15 минут.",
-  },
   standardHeaders: true,
   legacyHeaders: false,
-  handler: (req: Request, res: Response) => {
-    logger.warn(`Rate limit exceeded: ${req.ip}`);
-    res.status(429).json({
-      status: "error",
-      message: "Слишком много запросов. Попробуйте через 15 минут.",
-    });
-  },
 });
-
 app.use("/api/", limiter);
-app.use("/health", limiter);
 
-const frontendBuildPath = path.resolve(__dirname, "../../frontend/build");
-
-app.use(express.static(frontendBuildPath));
-
-// Логирование запросов
+// Логирование всех входящих запросов
 app.use((req: Request, res: Response, next: NextFunction) => {
   logger.info(`${req.method} ${req.path} - ${req.ip}`);
   next();
 });
 
-// Health check endpoint
+// --- ROUTES ---
+
+// Эндпоинт для проверки состояния сервера
 app.get("/health", (req: Request, res: Response) => {
-  // ... (ваш код health check)
-  const health = {
+  res.json({
     status: "ok",
-    timestamp: Date.now(),
     uptime: process.uptime(),
-    environment: process.env.NODE_ENV || "development",
     cacheStatus: cachedData ? "active" : "empty",
-  };
-  res.json(health);
+  });
 });
 
-// Эндпоинт для получения данных справочника
+// Основной эндпоинт для получения данных справочника
 app.get("/api/handbook", async (req: Request, res: Response) => {
-  // ... (ваш код /api/handbook)
   try {
     const data = await loadHandbookData();
     if (data) {
-      res.json({
-        status: "success",
-        data: data,
-      });
+      res.json({ status: "success", data });
     } else {
-      res.status(500).json({
-        status: "error",
-        message: "Не удалось загрузить данные справочника.",
-      });
+      res.status(500).json({ status: "error", message: "Не удалось загрузить данные справочника." });
     }
   } catch (error) {
     logger.error("Ошибка в /api/handbook:", error);
-    res.status(500).json({
-      status: "error",
-      message: "Внутренняя ошибка сервера.",
-    });
+    res.status(500).json({ status: "error", message: "Внутренняя ошибка сервера." });
   }
 });
 
-// Для ЛЮБОГО ДРУГОГО запроса, который не API и не статический файл,
-// отдаем главный index.html. Это позволяет React Router работать.
-app.get("*", (req: Request, res: Response, next: NextFunction) => {
-  // Игнорируем API-маршруты, чтобы они случайно не отдали index.html
-  if (req.path.startsWith("/api/") || req.path.startsWith("/health")) {
-    return next();
-  }
+// --- SERVING FRONTEND & ERROR HANDLING ---
 
-  const indexPath = path.join(frontendBuildPath, "index.html");
+// Раздача статических файлов собранного React-приложения
+const frontendBuildPath = path.resolve(__dirname, "../../frontend/build");
+app.use(express.static(frontendBuildPath));
 
-  if (fs.existsSync(indexPath)) {
-    res.sendFile(indexPath);
-  } else {
-    // Если index.html не найден (сборка не прошла)
-    res.status(500).json({
-      status: "error",
-      message: "Frontend build not found. Run 'npm run build' in /frontend.",
-    });
-  }
+// Обработчик для React Router: на все остальные запросы отдает index.html
+app.get("*", (req: Request, res: Response) => {
+  res.sendFile(path.join(frontendBuildPath, "index.html"));
 });
 
-// 404 для несуществующих роутов
-app.use((req: Request, res: Response) => {
-  res.status(404).json({
-    status: "error",
-    message: "Endpoint не найден",
-  });
-});
-
-// Глобальная обработка ошибок
+// Глобальный обработчик ошибок
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   logger.error("Необработанная ошибка:", err);
-  res.status(500).json({
-    status: "error",
-    message: "Внутренняя ошибка сервера",
-  });
+  res.status(500).json({ status: "error", message: "Внутренняя ошибка сервера" });
 });
 
 // Запуск сервера
 app.listen(PORT, () => {
   logger.info(`API-сервер запущен на порту ${PORT}`);
-  logger.info(`Health check: http://localhost:${PORT}/health`);
-  logger.info(`API endpoint: http://localhost:${PORT}/api/handbook`);
-  logger.info(`Environment: ${process.env.NODE_ENV || "development"}`);
-
-  // Предзагрузка данных
-  loadHandbookData().catch((err) => {
-    logger.error("Ошибка предзагрузки данных:", err);
-  });
-});
-
-// Graceful shutdown
-process.on("SIGTERM", () => {
-  logger.info("SIGTERM получен. Завершение работы...");
-  process.exit(0);
-});
-
-process.on("SIGINT", () => {
-  logger.info("SIGINT получен. Завершение работы...");
-  process.exit(0);
+  logger.info(`Environment: ${process.env.NODE_ENV}`);
+  loadHandbookData(); // Предзагрузка данных при старте
 });
