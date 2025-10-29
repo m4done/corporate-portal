@@ -120,15 +120,10 @@ const Handbook: React.FC = () => {
   const [preSearchExpanded, setPreSearchExpanded] = useState<string[] | null>(
     null
   );
+  const [rawOfficeData, setRawOfficeData] = useState<OfficeEmployee[]>([]);
 
   /**
    * Загружает данные для справочника.
-   * Реализует стратегию "cache-then-network":
-   * 1. Пытается получить данные из кэша (localforage).
-   * 2. Если есть подключение к сети, запрашивает свежие данные с API.
-   * 3. В случае успеха обновляет кэш и состояние.
-   * 4. В случае ошибки сети использует данные из кэша, если они есть.
-   * @param forceUpdate - Если true, кэш будет проигнорирован и будет выполнен сетевой запрос.
    */
   const fetchData = useCallback(async (forceUpdate = false) => {
     setLoadingStatus("Проверка данных...");
@@ -159,6 +154,7 @@ const Handbook: React.FC = () => {
           office: groupAndSortOfficeData(result.data.office),
           cabinets: sortCabinetData(result.data.cabinets),
         };
+        setRawOfficeData(result.data.office);
         const newCache: CachedData = {
           data: newData,
           timestamp: result.data.timestamp,
@@ -176,6 +172,10 @@ const Handbook: React.FC = () => {
         if (cachedData?.data) {
           setData(cachedData.data);
           setLastUpdated(cachedData.fetchTime);
+          const flatData = Object.values(cachedData.data.office).flatMap(
+            (group) => group.employees
+          );
+          setRawOfficeData(flatData);
           setLoadingStatus("Ошибка сети. Загружены данные из локального кэша.");
           return;
         }
@@ -220,10 +220,6 @@ const Handbook: React.FC = () => {
 
   /**
    * Универсальная функция для фильтрации массива объектов по строковому запросу.
-   * @param items - Массив для фильтрации.
-   * @param query - Поисковый запрос.
-   * @param keys - Ключи объектов, по которым будет производиться поиск.
-   * @returns Отфильтрованный массив.
    */
   const filterData = useCallback(
     <T extends Record<string, any>>(
@@ -245,37 +241,30 @@ const Handbook: React.FC = () => {
   );
 
   const filteredOffice = useMemo(() => {
-    const searchKeys: (keyof OfficeEmployee)[] = [
-      "department",
-      "position",
+    if (!searchQuery) {
+      return data.office;
+    }
+
+    const employeeSearchKeys: (keyof OfficeEmployee)[] = [
       "fullName",
+      "position",
       "internalNumber",
     ];
-    if (!searchQuery) return data.office;
-    const filteredGroupedData: GroupedOfficeData = {};
-    Object.keys(data.office).forEach((deptName) => {
-      const group = data.office[deptName];
-      const filteredEmployees = filterData(
-        group.employees,
-        searchQuery,
-        searchKeys
-      );
-      if (filteredEmployees.length > 0) {
-        filteredGroupedData[deptName] = {
-          employees: filteredEmployees,
-          generalNumber: group.generalNumber,
-        };
-      }
-    });
-    return filteredGroupedData;
-  }, [data.office, searchQuery, filterData]);
+
+    const filteredEmployees = filterData(
+      rawOfficeData,
+      searchQuery,
+      employeeSearchKeys
+    );
+
+    return groupAndSortOfficeData(filteredEmployees);
+  }, [searchQuery, data.office, rawOfficeData, filterData]);
 
   const filteredCabinets = useMemo(() => {
     const keys: (keyof Cabinet)[] = ["city", "address", "internalNumber"];
     return filterData(data.cabinets, searchQuery, keys);
   }, [data.cabinets, searchQuery, filterData]);
 
-  // Автоматически переключает вкладку, если результаты поиска найдены только в неактивной вкладке.
   useEffect(() => {
     if (!searchQuery) return;
     const hasOfficeResults = Object.keys(filteredOffice).length > 0;
@@ -354,7 +343,9 @@ const Handbook: React.FC = () => {
                     </thead>
                     <tbody>
                       {group.employees.map((employee) => (
-                        <tr key={employee.fullName}>
+                        <tr
+                          key={`${employee.fullName}-${employee.internalNumber}`}
+                        >
                           <td className="person-details">
                             <div className="full-name">{employee.fullName}</div>
                             <div className="position">{employee.position}</div>
@@ -411,7 +402,7 @@ const Handbook: React.FC = () => {
           <input
             ref={searchInputRef}
             type="text"
-            placeholder="Быстрый поиск"
+            placeholder="Поиск по всем полям..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="search-input"
