@@ -24,12 +24,12 @@
     "sanitize-html": "^2.13.0",
     "winston": "^3.13.0",
     "typescript": "^5.4.5"
-  }
   },
   "devDependencies": {
     "@types/express": "^4.17.21",
     "@types/node": "^20.12.12",
     "@types/sanitize-html": "^2.11.0",
     "nodemon": "^3.1.0",
-    "ts-node": "^10.9.2",    
+    "ts-node": "^10.9.2"
+  }
 }
