@@ -11,15 +11,28 @@ import dotenv from "dotenv";
 dotenv.config();
 
 // Проверка наличия обязательных переменных окружения при старте
-const requiredEnvVars = ['PORT', 'EXCEL_FILE_NAME', 'ALLOWED_ORIGINS', 'NODE_ENV'];
-const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
+const requiredEnvVars = [
+  "PORT",
+  "EXCEL_FILE_NAME",
+  "ALLOWED_ORIGINS",
+  "NODE_ENV",
+];
+const missingEnvVars = requiredEnvVars.filter(
+  (varName) => !process.env[varName]
+);
 if (missingEnvVars.length > 0) {
-  throw new Error(`ОШИБКА: Отсутствуют переменные окружения: ${missingEnvVars.join(', ')}`);
+  throw new Error(
+    `ОШИБКА: Отсутствуют переменные окружения: ${missingEnvVars.join(", ")}`
+  );
 }
 
 const app = express();
 const PORT = process.env.PORT || 3001;
-const EXCEL_FILE_PATH = path.resolve(__dirname, "..", process.env.EXCEL_FILE_NAME!);
+const EXCEL_FILE_PATH = path.resolve(
+  __dirname,
+  "..",
+  process.env.EXCEL_FILE_NAME!
+);
 const ALLOWED_ORIGINS = process.env.ALLOWED_ORIGINS?.split(",") || [];
 
 // Data Interfaces
@@ -47,7 +60,10 @@ interface HandbookData {
 // Настройка логгера
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || "info",
-  format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
   transports: [
     new winston.transports.File({ filename: "logs/error.log", level: "error" }),
     new winston.transports.File({ filename: "logs/combined.log" }),
@@ -70,7 +86,10 @@ let lastModifiedTime = 0;
  */
 function sanitizeString(input: any): string {
   if (!input) return "";
-  return sanitizeHtml(String(input), { allowedTags: [], allowedAttributes: {} }).trim();
+  return sanitizeHtml(String(input), {
+    allowedTags: [],
+    allowedAttributes: {},
+  }).trim();
 }
 
 /**
@@ -141,7 +160,9 @@ async function loadHandbookData(): Promise<HandbookData | null> {
     };
     lastModifiedTime = currentModTime;
 
-    logger.info(`Данные загружены. Офис: ${officeData.length}, Кабинеты: ${cabinetsData.length}`);
+    logger.info(
+      `Данные загружены. Офис: ${officeData.length}, Кабинеты: ${cabinetsData.length}`
+    );
     return cachedData;
   } catch (error) {
     logger.error("Ошибка при обработке Excel-файла:", error);
@@ -151,6 +172,7 @@ async function loadHandbookData(): Promise<HandbookData | null> {
 
 // --- MIDDLEWARES ---
 
+/*
 // Принудительный редирект на HTTPS в production-среде
 app.use((req: Request, res: Response, next: NextFunction) => {
   if (process.env.NODE_ENV === "production" && req.headers["x-forwarded-proto"] !== "https") {
@@ -158,9 +180,12 @@ app.use((req: Request, res: Response, next: NextFunction) => {
   }
   next();
 });
+*/
 
 // Установка защитных HTTP-заголовков
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(
+  helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false })
+);
 
 // Настройка CORS
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -169,7 +194,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     res.header("Access-Control-Allow-Origin", origin);
   }
   res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept");
+  res.header(
+    "Access-Control-Allow-Headers",
+    "Origin, X-Requested-With, Content-Type, Accept"
+  );
   if (req.method === "OPTIONS") return res.sendStatus(200);
   next();
 });
@@ -207,11 +235,18 @@ app.get("/api/handbook", async (req: Request, res: Response) => {
     if (data) {
       res.json({ status: "success", data });
     } else {
-      res.status(500).json({ status: "error", message: "Не удалось загрузить данные справочника." });
+      res
+        .status(500)
+        .json({
+          status: "error",
+          message: "Не удалось загрузить данные справочника.",
+        });
     }
   } catch (error) {
     logger.error("Ошибка в /api/handbook:", error);
-    res.status(500).json({ status: "error", message: "Внутренняя ошибка сервера." });
+    res
+      .status(500)
+      .json({ status: "error", message: "Внутренняя ошибка сервера." });
   }
 });
 
@@ -229,7 +264,9 @@ app.get("*", (req: Request, res: Response) => {
 // Глобальный обработчик ошибок
 app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
   logger.error("Необработанная ошибка:", err);
-  res.status(500).json({ status: "error", message: "Внутренняя ошибка сервера" });
+  res
+    .status(500)
+    .json({ status: "error", message: "Внутренняя ошибка сервера" });
 });
 
 // Запуск сервера
